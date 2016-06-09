@@ -28,6 +28,7 @@ SHOPIFY_PASS = os.environ.get("SHOPIFY_PASS")
 SHOP_URL = "jamie-ds-emporium.myshopify.com"
 
 BASE_URL = "https://%s:%s@%s/admin" % (SHOPIFY_KEY, SHOPIFY_PASS, SHOP_URL)
+DEBUG = True
 
 def main():
 
@@ -41,48 +42,50 @@ def main():
         else:
             return in_data, pyaudio.paComplete
 
+    ai = apiai.ApiAI(CLIENT_ACCESS_TOKEN, SUBSCRIPTION_KEY)
     os.system("say -v Karen \"Hi, I'm Karen. How can I help? \"")
 
     while True:
 
-        resampler = apiai.Resampler(source_samplerate=RATE)
+        if DEBUG: # text input
+            request = ai.text_request()
+            request.query = raw_input("What do you want to know? ")
 
-        vad = apiai.VAD()
+        else: # voice input
+            resampler = apiai.Resampler(source_samplerate=RATE)
 
-        ai = apiai.ApiAI(CLIENT_ACCESS_TOKEN, SUBSCRIPTION_KEY)
+            vad = apiai.VAD()
 
-        request = ai.voice_request()
+            request = ai.voice_request()
 
-        request.lang = 'en' # optional, default value equal 'en'
+            request.lang = 'en' # optional, default value equal 'en'
 
-        ########
+            p = pyaudio.PyAudio()
 
-        p = pyaudio.PyAudio()
+            stream = p.open(format=FORMAT,
+                            channels=CHANNELS,
+                            rate=RATE,
+                            input=True,
+                            output=False,
+                            frames_per_buffer=CHUNK,
+                            stream_callback=callback)
 
-        stream = p.open(format=FORMAT,
-                        channels=CHANNELS,
-                        rate=RATE,
-                        input=True,
-                        output=False,
-                        frames_per_buffer=CHUNK,
-                        stream_callback=callback)
+            stream.start_stream()
 
-        stream.start_stream()
+            print ("Say!")
 
-        print ("Say!")
+            try:
+                while stream.is_active():
+                    time.sleep(0.1)
+            except Exception:
+                os.system("say Sorry can you repeat that?")
+                raise e
+            except KeyboardInterrupt:
+                pass
 
-        try:
-            while stream.is_active():
-                time.sleep(0.1)
-        except Exception:
-            os.system("say Sorry can you repeat that?")
-            raise e
-        except KeyboardInterrupt:
-            pass
-
-        stream.stop_stream()
-        stream.close()
-        p.terminate()
+            stream.stop_stream()
+            stream.close()
+            p.terminate()
 
         print ("Wait for response...")
         response = request.getresponse()
@@ -96,10 +99,6 @@ def main():
         try:
             intent = json_obj['result']['metadata']['intentName']
             params = json_obj['result']['parameters']
-
-            # shopify library -- does it have search endpoint?!
-            # shop_url = "https://%s:%s@jamie-ds-emporium.myshopify.com/admin" % (SHOPIFY_KEY, SHOPIFY_PASS)
-            # shopify.ShopifyResource.set_site(shop_url)
 
             if intent == 'customer-lookup':
                 first_name = params['customer-name']['first-name']
@@ -124,17 +123,27 @@ def main():
                 message = "The %s for %s %s is %s" % (customer_info, first_name, last_name, answer)
 
 
-            elif intent == 'order-fulfillment':
-                action = params['order-action']
-                r = requests.get ("%s/orders/count.json?fulfillment_status=%s" % (BASE_URL, action))
-                count = json.loads(r.content)['count']
+            elif intent == 'order-information':
+                number = params['order-number']
 
-                message = ""
-                if action == 'unshipped':
-                    message = "%d orders have not been shipped" % count
-                else:
-                    message = "%d orders have been %s" % (count, action)
+                if number is not None:
+                    r = requests.get("%s/orders/%d.json") % (BASE_URL, number)
 
+                # WIP
+
+            elif intent == 'fulfillment-count':
+                state = params['fulfillment-state']
+
+                if state is not None:
+                    r = requests.get ("%s/orders/count.json?fulfillment_status=%s" % (BASE_URL, state))
+                    count = json.loads(r.content)['count']
+
+                    if state == 'shipped':
+                        message = "%d orders have been shipped" % count
+                    elif state == 'unshipped':
+                        message = "%d orders have not been shipped" % count
+                    else:
+                        message = "%d orders have %s status" % (count, action)
 
             elif intent == 'order-history-period':
                 period = params['date-period']
@@ -159,17 +168,19 @@ def main():
                 message = "There were %d orders on that day." % count
 
 
-            elif intent == 'product-inventory':
+            elif intent == 'product-information':
                 product = params['product']
                 r = requests.get("%s/products.json?title=%s" % (BASE_URL, product))
                 try:
                     prod_inventory = json.loads(r.content)['products'][0]['variants'][0]['inventory_quantity']
-                    print prod_inventory
                     message = "You have %s %s remaining in inventory" % (prod_inventory, product)
                 except:
                     message = "Could not find information for %s" % product
 
-        except:
+            else:
+                print "Intent not matched."
+
+        except KeyError:
             message = "I don\'t know. Ask David Lennie."
 
         print message
