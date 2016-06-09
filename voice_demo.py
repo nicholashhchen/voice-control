@@ -7,7 +7,6 @@ import apiai
 import pyaudio
 import time
 import json
-import shopify
 import requests
 from os.path import join, dirname
 from dotenv import load_dotenv
@@ -53,15 +52,10 @@ def main():
 
         else: # voice input
             resampler = apiai.Resampler(source_samplerate=RATE)
-
             vad = apiai.VAD()
 
             request = ai.voice_request()
-
-            request.lang = 'en' # optional, default value equal 'en'
-
             p = pyaudio.PyAudio()
-
             stream = p.open(format=FORMAT,
                             channels=CHANNELS,
                             rate=RATE,
@@ -69,7 +63,6 @@ def main():
                             output=False,
                             frames_per_buffer=CHUNK,
                             stream_callback=callback)
-
             stream.start_stream()
 
             print ("Say!")
