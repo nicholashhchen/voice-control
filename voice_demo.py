@@ -48,7 +48,7 @@ def main():
 
         if DEBUG: # text input
             request = ai.text_request()
-            request.query = raw_input("What do you want to know? ")
+            request.query = raw_input("How can I help? ")
 
         else: # voice input
             resampler = apiai.Resampler(source_samplerate=RATE)
@@ -120,9 +120,52 @@ def main():
                 number = params['order-number']
 
                 if number is not None:
-                    r = requests.get("%s/orders/%d.json") % (BASE_URL, number)
+                    r = requests.get("%s/orders/%d.json" % (BASE_URL, number))
 
                 # WIP
+
+            elif intent == 'modify-order':
+                # TBD: Allow user to provide order 'name' instead of number
+                number = int(params['order-number'])
+                action = params['order-action']
+
+                if number is not None:
+                    prefix = "%s/orders/%d"  % (BASE_URL, number)
+
+                    if action == 'cancel' or action == 'close':
+                        r = requests.post('%s/%s.json' % (prefix, action), data={})
+
+                        if r.status_code == 200:
+                            if action == 'cancel':
+                                message = "Cancelled order number %d" % number
+                            elif action == 'close':
+                                message = "Closed order number %d" % number
+                        else:
+                            message = "Couldn't perform that action on order %d" % number
+
+                    elif action == 'delete':
+                        r = requests.delete('%s.json' % prefix)
+
+                        if r.status_code == 200:
+                            message = "Deleted order %d" % number
+                        else:
+                            message = "Couldn't delete order %d" % number
+
+                    elif action == 'note':
+                        note = "This note is a test!"
+                        payload = {"order": {"note": note}}
+                        r = requests.put('%s.json' % prefix, json=payload)
+
+                        if r.status_code == 200:
+                            message = "Added note %s to order %s" % (note, number)
+                        else:
+                            message = "I wasn't able to find that order."
+
+                    # elif action == 'fulfill':
+                        # WIP
+
+                    # elif action == 'create':
+                        # WIP
 
             elif intent == 'fulfillment-count':
                 state = params['fulfillment-state']
