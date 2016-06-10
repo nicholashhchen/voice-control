@@ -10,6 +10,9 @@ import json
 import requests
 from os.path import join, dirname
 from dotenv import load_dotenv
+from Tkinter import *
+
+
 
 CHUNK = 512
 FORMAT = pyaudio.paInt16
@@ -29,24 +32,46 @@ SHOP_URL = "jamie-ds-emporium.myshopify.com"
 BASE_URL = "https://%s:%s@%s/admin" % (SHOPIFY_KEY, SHOPIFY_PASS, SHOP_URL)
 DEBUG = False
 
-def main():
-    evaluate_intent = False
-    oldtime = None
 
-    def callback(in_data, frame_count, time_info, status):
-        frames, data = resampler.resample(in_data, frame_count)
-        state = vad.processFrame(frames)
-        request.send(data)
+class Application(Frame):
+    def say_hi(self):
+        print "Starting conversation!"
 
-        if (state == 1):
-            return in_data, pyaudio.paContinue
-        else:
-            return in_data, pyaudio.paComplete
+    def createWidgets(self):
+        self.QUIT = Button(self)
+        self.QUIT["text"] = "QUIT"
+        self.QUIT["fg"]   = "red"
+        self.QUIT["command"] =  self.quit
 
-    ai = apiai.ApiAI(CLIENT_ACCESS_TOKEN, SUBSCRIPTION_KEY)
-    #os.system("say -v Karen \"Hi, I'm Karen. How can I help? \"")
+        self.QUIT.pack({"side": "left"})
 
-    while True:
+        self.hi_there = Button(self)
+        self.hi_there["text"] = "Communicate",
+        self.hi_there["command"] = self.WorkIt
+
+        self.hi_there.pack({"side": "left"})
+
+        self.icon = PhotoImage(file='microphone-512.gif')
+        self.label = Label(image=self.icon)
+        self.label.image = self.icon
+        self.label.pack()
+
+    def WorkIt(self):
+        evaluate_intent = False
+        oldtime = None
+
+        def callback(in_data, frame_count, time_info, status):
+            frames, data = resampler.resample(in_data, frame_count)
+            state = vad.processFrame(frames)
+            request.send(data)
+
+            if (state == 1):
+                return in_data, pyaudio.paContinue
+            else:
+                return in_data, pyaudio.paComplete
+
+        ai = apiai.ApiAI(CLIENT_ACCESS_TOKEN, SUBSCRIPTION_KEY)
+        #os.system("say -v Karen \"Hi, I'm Karen. How can I help? \"")
 
         if DEBUG: # text input
             request = ai.text_request()
@@ -69,10 +94,6 @@ def main():
 
             print ("Say!")
 
-            if oldtime is not None:
-                if time.time() - oldtime > 10:
-                    evaluate_intent = False
-
             try:
                 while stream.is_active():
                     time.sleep(0.1)
@@ -85,6 +106,7 @@ def main():
             stream.stop_stream()
             stream.close()
             p.terminate()
+
 
         print ("Wait for response...")
         response = request.getresponse()
@@ -102,137 +124,129 @@ def main():
             print intent
             print params
 
-            if intent == 'start':
-                evaluate_intent = True
-                print "starting the conversation"
-                oldtime = time.time()
+            if intent == 'customer-lookup':
+                first_name = params['customer-name']['first-name']
+                last_name = params['customer-name']['last-name']
+                customer_info = params['customer-info']
+                r = requests.get ("%s/customers/search.json?query=%s+%s" % (BASE_URL, first_name, last_name))
+                print r.content
+                customer_data = json.loads(r.content)['customers'][0]
 
-            elif evaluate_intent == True:
-                if intent == 'customer-lookup':
-                    first_name = params['customer-name']['first-name']
-                    last_name = params['customer-name']['last-name']
-                    customer_info = params['customer-info']
-                    r = requests.get ("%s/customers/search.json?query=%s+%s" % (BASE_URL, first_name, last_name))
-                    customer_data = json.loads(r.content)['customers'][0]
+                if customer_info == 'address':
+                    answer = customer_data['default_address']['address1']
+                elif customer_info == 'city':
+                    answer = customer_data['default_address']['city']
+                elif customer_info == 'phone-number':
+                    answer = str(customer_data['default_address']['phone'])
+                elif customer_info == 'country':
+                    answer = customer_data['default_address']['country']
+                elif customer_info == 'order-total':
+                    answer = str(customer_data['total_spent']) + 'dollars'
+                elif customer_info == 'email':
+                    answer = customer_data['email']
 
-                    if customer_info == 'address':
-                        answer = customer_data['default_address']['address1']
-                    elif customer_info == 'city':
-                        answer = customer_data['default_address']['city']
-                    elif customer_info == 'phone-number':
-                        answer = str(customer_data['default_address']['phone'])
-                    elif customer_info == 'country':
-                        answer = customer_data['default_address']['country']
-                    elif customer_info == 'order-total':
-                        answer = str(customer_data['total_spent']) + 'dollars'
-                    elif customer_info == 'email':
-                        answer = customer_data['email']
+                message = "The %s for %s %s is %s" % (customer_info, first_name, last_name, answer)
 
-                    message = "The %s for %s %s is %s" % (customer_info, first_name, last_name, answer)
+            elif intent == 'order-information':
+                number = params['order-number']
 
-                elif intent == 'order-information':
-                    number = params['order-number']
+                if number is not None:
+                    r = requests.get("%s/orders/%d.json" % (BASE_URL, number))
 
-                    if number is not None:
-                        r = requests.get("%s/orders/%d.json" % (BASE_URL, number))
+                # WIP
 
-                    # WIP
+            elif intent == 'modify-order':
+                # TBD: Allow user to provide order 'name' instead of number
+                number = int(params['order-number'])
+                action = params['order-action']
 
-                elif intent == 'modify-order':
-                    # TBD: Allow user to provide order 'name' instead of number
-                    number = int(params['order-number'])
-                    action = params['order-action']
+                if number is not None:
+                    prefix = "%s/orders/%d"  % (BASE_URL, number)
 
-                    if number is not None:
-                        prefix = "%s/orders/%d"  % (BASE_URL, number)
+                    if action == 'cancel' or action == 'close':
+                        r = requests.post('%s/%s.json' % (prefix, action), data={})
 
-                        if action == 'cancel' or action == 'close':
-                            r = requests.post('%s/%s.json' % (prefix, action), data={})
-
-                            if r.status_code == 200:
-                                if action == 'cancel':
-                                    message = "Cancelled order number %d" % number
-                                elif action == 'close':
-                                    message = "Closed order number %d" % number
-                            else:
-                                message = "Couldn't perform that action on order %d" % number
-
-                        elif action == 'delete':
-                            r = requests.delete('%s.json' % prefix)
-
-                            if r.status_code == 200:
-                                message = "Deleted order %d" % number
-                            else:
-                                message = "Couldn't delete order %d" % number
-
-                        elif action == 'note':
-                            note = "This note is a test!"
-                            payload = {"order": {"note": note}}
-                            r = requests.put('%s.json' % prefix, json=payload)
-
-                            if r.status_code == 200:
-                                message = "Added note %s to order %s" % (note, number)
-                            else:
-                                message = "I wasn't able to find that order."
-
-                        # elif action == 'fulfill':
-                            # WIP
-
-                        # elif action == 'create':
-                            # WIP
-
-                elif intent == 'fulfillment-count':
-                    state = params['fulfillment-state']
-
-                    if state is not None:
-                        r = requests.get ("%s/orders/count.json?fulfillment_status=%s" % (BASE_URL, state))
-                        count = json.loads(r.content)['count']
-
-                        if state == 'shipped':
-                            message = "%d orders have been shipped" % count
-                        elif state == 'unshipped':
-                            message = "%d orders have not been shipped" % count
+                        if r.status_code == 200:
+                            if action == 'cancel':
+                                message = "Cancelled order number %d" % number
+                            elif action == 'close':
+                                message = "Closed order number %d" % number
                         else:
-                            message = "%d orders have %s status" % (count, action)
+                            message = "Couldn't perform that action on order %d" % number
 
-                elif intent == 'order-history-period':
-                    period = params['date-period']
+                    elif action == 'delete':
+                        r = requests.delete('%s.json' % prefix)
 
-                    start_date = period.split('/')[0].replace('/', '-') + "T00:00:00-05:00"
-                    end_date = period.split('/')[1].replace('/', '-') + "T23:59:59-05:00"
+                        if r.status_code == 200:
+                            message = "Deleted order %d" % number
+                        else:
+                            message = "Couldn't delete order %d" % number
 
-                    r = requests.get ("%s/orders/count.json?created_at_min=%s&created_at_max=%s" % (BASE_URL, start_date, end_date))
-                    count = json.loads (r.content)['count']
+                    elif action == 'note':
+                        note = "This note is a test!"
+                        payload = {"order": {"note": note}}
+                        r = requests.put('%s.json' % prefix, json=payload)
 
-                    message = "There were %d orders during that period." % count
+                        if r.status_code == 200:
+                            message = "Added note %s to order %s" % (note, number)
+                        else:
+                            message = "I wasn't able to find that order."
+
+                    # elif action == 'fulfill':
+                        # WIP
+
+                    # elif action == 'create':
+                        # WIP
+
+            elif intent == 'fulfillment-count':
+                state = params['fulfillment-state']
+
+                if state is not None:
+                    r = requests.get ("%s/orders/count.json?fulfillment_status=%s" % (BASE_URL, state))
+                    count = json.loads(r.content)['count']
+
+                    if state == 'shipped':
+                        message = "%d orders have been shipped" % count
+                    elif state == 'unshipped':
+                        message = "%d orders have not been shipped" % count
+                    else:
+                        message = "%d orders have %s status" % (count, action)
+
+            elif intent == 'order-history-period':
+                period = params['date-period']
+
+                start_date = period.split('/')[0].replace('/', '-') + "T00:00:00-05:00"
+                end_date = period.split('/')[1].replace('/', '-') + "T23:59:59-05:00"
+
+                r = requests.get ("%s/orders/count.json?created_at_min=%s&created_at_max=%s" % (BASE_URL, start_date, end_date))
+                count = json.loads (r.content)['count']
+
+                message = "There were %d orders during that period." % count
 
 
-                elif intent == 'order-history-date':
-                    date = params['date']
-                    request_date_min = date+"T00:00:00-05:00"
-                    request_date_max = date+"T23:59:59-05:00"
+            elif intent == 'order-history-date':
+                date = params['date']
+                request_date_min = date+"T00:00:00-05:00"
+                request_date_max = date+"T23:59:59-05:00"
 
-                    r = requests.get ("%s/orders/count.json?created_at_min=%s&created_at_max=%s" % (BASE_URL, request_date_min, request_date_max))
-                    count = json.loads (r.content)['count']
+                r = requests.get ("%s/orders/count.json?created_at_min=%s&created_at_max=%s" % (BASE_URL, request_date_min, request_date_max))
+                count = json.loads (r.content)['count']
 
-                    message = "There were %d orders on that day." % count
+                message = "There were %d orders on that day." % count
 
 
-                elif intent == 'product-information':
-                    product = params['product']
-                    r = requests.get("%s/products.json?title=%s" % (BASE_URL, product))
-                    try:
-                        prod_inventory = json.loads(r.content)['products'][0]['variants'][0]['inventory_quantity']
-                        message = "You have %s %s remaining in inventory" % (prod_inventory, product)
-                    except:
-                        message = "Could not find information for %s" % product
-                else:
-                    print "Didn't evaluate intent."
-
-                evaluate_intent = False
+            elif intent == 'product-information':
+                product = params['product']
+                r = requests.get("%s/products.json?title=%s" % (BASE_URL, product))
+                try:
+                    prod_inventory = json.loads(r.content)['products'][0]['variants'][0]['inventory_quantity']
+                    message = "You have %s %s remaining in inventory" % (prod_inventory, product)
+                except:
+                    message = "Could not find information for %s" % product
+            else:
+                print "Didn't evaluate intent."                 
 
         except KeyError:
-            evaluate_intent = False
             message = "I'm not sure what you mean."
 
         if message != "":
@@ -241,5 +255,18 @@ def main():
 
         time.sleep(0.5)
 
-if __name__ == '__main__':
-    main()
+
+    def __init__(self, master=None):
+        Frame.__init__(self, master)
+        master.minsize(width=800, height=600)
+        master.resizable(width=False, height=False)
+        self.pack()
+        self.createWidgets()
+        #self.WorkIt()
+
+root = Tk()
+app = Application(master=root)
+app.mainloop()
+root.destroy()
+
+
